@@ -1,0 +1,149 @@
+Transform: AWS::Serverless-2016-10-31
+
+Globals:
+  Function:
+    CodeUri: src/
+    Runtime: nodejs16.x
+    Timeout: 30
+    Environment:
+      Variables:
+        TABLE_NAME: !Ref rates
+        TABLE_ARN: !GetAtt rates.Arn
+        USE_LOCAL_DYNAMODB: "false"
+        LOCAL_DB_ENDPOINT: ""
+
+Resources:
+  rates:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: star
+          AttributeType: 'N'
+      BillingMode: PAY_PER_REQUEST
+      KeySchema:
+        - AttributeName: star
+          KeyType: HASH
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+  AddItem:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: AddItem
+      Handler: additem.lambdaHandler
+      MemorySize: 128
+      Tracing: Active
+      Events:
+        RestApiGatewayPOSTratesitemId:
+          Type: Api
+          Properties:
+            Path: /rates/{itemId}
+            Method: POST
+            RestApiId: !Ref RestApiGateway
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref rates
+  addItemLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${AddItem}
+  GetAllItems:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: GetAllItems
+      Handler: getallitems.lambdaHandler
+      MemorySize: 128
+      Tracing: Active
+      Events:
+        RestApiGatewayGETrates:
+          Type: Api
+          Properties:
+            Path: /rates
+            Method: GET
+            RestApiId: !Ref RestApiGateway
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref rates
+  GetAllItemsLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${GetAllItems}
+  GetItem:
+    Type: AWS::Serverless::Function
+    Properties:
+      Description: !Sub
+        - Stack ${AWS::StackName} Function ${ResourceName}
+        - ResourceName: GetItem
+      Handler: getitem.lambdaHandler
+      MemorySize: 128
+      Tracing: Active
+      Events:
+        RestApiGatewayGETratesitemId:
+          Type: Api
+          Properties:
+            Path: /rates/{itemId}
+            Method: GET
+            RestApiId: !Ref RestApiGateway
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref rates
+  GetItemLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${GetItem}
+  RestApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub
+        - ${ResourceName} From Stack ${AWS::StackName}
+        - ResourceName: RestApiGateway
+      StageName: prod
+      Cors: 
+        AllowMethods: "'POST, GET'"
+        AllowOrigin: "'*'"
+        AllowHeaders: "'Content-type, x-api-key'"
+      DefinitionBody:
+        openapi: '3.0'
+        info: {}
+        paths:
+          /rates:
+            get:
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetAllItems.Arn}/invocations
+              responses: {}
+          /rates/{itemId}:
+            get:
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetItem.Arn}/invocations
+              responses: {}
+            post:
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri: !Sub arn:${AWS::Partition}:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AddItem.Arn}/invocations
+              responses: {}
+      EndpointConfiguration: REGIONAL
+      TracingEnabled: true
+  InvokeURLParameterStore:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Type: String
+      Value: !Sub "https://${RestApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod"
+      Name: /api-gateway/url
+      Description: The parameter to track API URL for frontend
+
+
+Outputs:
+  InvokeURL:
+    Description: "API Gateway endpoint URL"
+    Value: !Sub "https://${RestApiGateway}.execute-api.${AWS::Region}.amazonaws.com/prod"

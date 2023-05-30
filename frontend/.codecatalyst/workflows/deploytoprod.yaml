@@ -1,0 +1,152 @@
+Name: DeployToProd
+SchemaVersion: "1.0"
+Triggers:
+  - Type: PUSH
+    Branches:
+      - main
+    FilesChanged:
+      - "application/.*"
+      - "infrastructure/.*"
+      - ".codecatalyst/workflows/.*"
+Actions:
+  DeployInfra:
+    Actions:
+      TerraformLint:
+        Identifier: aws/github-actions-runner@v1
+        Inputs:
+          Sources:
+            - WorkflowSource
+        Configuration:
+          Steps:
+            - name: Setup TFLint
+              uses: terraform-linters/setup-tflint@v3
+            - name: Init TFLint
+              run: tflint --init
+            - name: Run TFLint
+              run: |
+                tflint --chdir=infrastructure/dev/ -f compact
+                tflint --chdir=infrastructure/prod/ -f compact
+        Compute:
+            Type: EC2
+      TerraformApply:
+        Identifier: aws/build@v1
+        DependsOn:
+          - TerraformLint
+        Inputs:
+          Sources:
+            - WorkflowSource
+        Configuration:
+          Steps:
+            - Run: export TF_VERSION=1.4.5 && wget -O terraform.zip "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip"
+            - Run: unzip terraform.zip && rm terraform.zip && mv terraform /usr/bin/terraform && chmod +x /usr/bin/terraform
+            - Run: cd infrastructure/prod/
+            - Run: terraform init -no-color
+            - Run: terraform plan -no-color -input=false
+            - Run: terraform apply -auto-approve -no-color -input=false
+        Environment:
+          Name: production
+          Connections:
+            - Name: "Your AWS account ID"
+              Role: CodeCatalystPreviewDevelopmentAdministrator-4sfz18
+  DeployApp:
+    DependsOn:
+      - DeployInfra
+    Actions:
+      Build:
+        Compute:
+            Type: Lambda
+        Identifier: aws/build@v1
+        Inputs:
+          Sources:
+            - WorkflowSource
+        Outputs:
+          Artifacts:
+            - Name: build
+              Files:
+                - application/build/**/*
+          Variables:
+            - S3_BUCKET
+            - CLOUDFRONT_DISTRIBUTION_ID
+          Reports:
+            clover-coverage:
+              Format: CLOVERXML
+              IncludePaths:
+                - "application/coverage/clover.xml"
+              SuccessCriteria:
+                LineCoverage: 50
+                BranchCoverage: 50
+            jest-unit-test:
+              Format: JUNITXML
+              IncludePaths:
+                - "application/coverage/junit.xml"
+              SuccessCriteria:
+                PassRate: 90
+            static-analys:
+              Format: ESLINTJSON
+              IncludePaths: 
+                - application/coverage/static-analys.json
+              SuccessCriteria:
+                StaticAnalysisBug:
+                  Severity: CRITICAL
+                StaticAnalysisSecurity:
+                  Severity: CRITICAL
+                StaticAnalysisQuality:
+                  Severity: CRITICAL
+        Configuration:
+          Steps:
+            - Run: REACT_APP_API_URL=$(aws ssm get-parameter --name "/api-gateway/url" --query "Parameter.Value" --output text --region ap-southeast-1)
+            - Run: S3_BUCKET=$(aws ssm get-parameter --name "/dev/s3_bucket_uri" --query "Parameter.Value" --output text --region ap-southeast-1)
+            - Run: CLOUDFRONT_DISTRIBUTION_ID=$(aws ssm get-parameter --name "/dev/cloudfront_distrbution_id" --query "Parameter.Value" --output text --region ap-southeast-1)
+            - Run: cd application/ 
+            - Run: npm install
+            - Run: mkdir coverage/
+            - Run: npm run lint
+            - Run: npm test -- --coverage --watchAll=false --testResultsProcessor="jest-junit"
+            - Run: npm run build
+        Environment:
+          Name: production
+          Connections:
+            - Name: "Your AWS account ID"
+              Role: CodeCatalystPreviewDevelopmentAdministrator-4sfz18
+      CD:
+        Identifier: aws/build@v1
+        DependsOn:
+          - Build
+        Compute:
+            Type: Lambda
+        Inputs:
+          Artifacts:
+            - build
+        Environment:
+          Name: production
+          Connections:
+            - Name: "Your AWS account ID"
+              Role: CodeCatalystPreviewDevelopmentAdministrator-4sfz18
+        Configuration:
+          Steps:
+            - Run: aws s3 cp application/build/ ${Build.S3_BUCKET} --recursive
+            - Run: aws cloudfront create-invalidation --distribution-id ${Build.CLOUDFRONT_DISTRIBUTION_ID} --path '/*'
+            - Run: CLOUDFRONT_DOMAIN=$(aws cloudfront get-distribution --id ${Build.CLOUDFRONT_DISTRIBUTION_ID} --query=Distribution.DomainName --output text)
+        Outputs:
+          Variables:
+            - CLOUDFRONT_DOMAIN
+  NotifiyViaSlack:
+    Identifier: aws/github-actions-runner@v1.0.0 
+    Compute:
+      Type: EC2
+      Fleet: Linux.x86-64.Large
+    DependsOn:
+      - DeployApp
+    Configuration:
+      Steps:
+        - uses: slackapi/slack-github-action@v1.23.0
+          with:
+            payload: |
+              {
+                "channel": "#aws-code-catalyst",
+                "username": "codecatalyst-workflow",
+                "text": "Frontend Application deployed successfully on Prod Environment, see https://${DeployApp.CD.CLOUDFRONT_DOMAIN}",
+                "icon_emoji": ":building_construction:"
+              }
+          env:
+            SLACK_WEBHOOK_URL: ${Secrets.SLACK_WEBHOOK}

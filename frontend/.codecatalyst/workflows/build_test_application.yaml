@@ -1,0 +1,60 @@
+Name: Build_Test_Application
+SchemaVersion: "1.0"
+Triggers:
+  - Type: PULLREQUEST
+    Events:
+      - OPEN
+      - REVISION
+    Branches:
+      - develop
+      - main
+    FilesChanged:
+      - "application/.*"
+      - ".codecatalyst/workflows/.*"
+Actions:
+  BuildAndTest:
+    Compute:
+        #Type: Lambda
+        Type: EC2
+        Fleet: Linux.Arm64.Large
+    Identifier: aws/build@v1
+    Inputs:
+      Sources:
+        - WorkflowSource
+    Outputs:
+      Reports:
+        clover-coverage:
+          Format: CLOVERXML
+          IncludePaths:
+            - "application/coverage/clover.xml"
+          SuccessCriteria:
+            LineCoverage: 50
+            BranchCoverage: 50
+        jest-unit-test:
+          Format: JUNITXML
+          IncludePaths:
+            - "application/coverage/junit.xml"
+          SuccessCriteria:
+            PassRate: 90
+        static-analys:
+          Format: ESLINTJSON
+          IncludePaths: 
+            - application/coverage/static-analys.json
+          SuccessCriteria:
+            StaticAnalysisBug:
+              Severity: CRITICAL
+            StaticAnalysisSecurity:
+              Severity: CRITICAL
+            StaticAnalysisQuality:
+              Severity: CRITICAL            
+    Configuration:
+      Container:
+          Registry: DockerHub
+          Image: node:latest
+      Steps:
+        - Run: cd application/
+        - Run: npm install
+        - Run: mkdir coverage/
+        - Run: npm run lint
+        - Run: npm test -- --coverage --watchAll=false --testResultsProcessor="jest-junit"
+        - Run: npm run build

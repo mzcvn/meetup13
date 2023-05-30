@@ -1,0 +1,34 @@
+Name: Test_Infra
+SchemaVersion: "1.0"
+
+Triggers:
+  - Type: PULLREQUEST
+    Branches:
+      - develop
+      - main
+    Events:
+      - OPEN
+      - REVISION
+    FilesChanged:
+      - "infrastructure/dev/.*"
+      - "infrastructure/prod/.*"
+      - ".codecatalyst/workflows/.*"
+Compute:
+  Type: EC2
+
+Actions:
+  GitHubAction:
+    Identifier: aws/github-actions-runner@v1
+    Inputs:
+      Sources:
+        - WorkflowSource
+    Configuration:
+      Steps:
+        - name: Setup TFLint
+          uses: terraform-linters/setup-tflint@v3
+        - name: Init TFLint
+          run: tflint --init
+        - name: Run TFLint
+          run: |
+            tflint --chdir=infrastructure/dev/ -f compact
+            tflint --chdir=infrastructure/prod/ -f compact

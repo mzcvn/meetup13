@@ -1,0 +1,53 @@
+schemaVersion: 2.0.0
+metadata:
+  name: frontend
+  version: 1.0.1
+  displayName: Event Sastification Rating FrontEnd
+  description: Devfile for FrontEnd
+  tags:
+    - aws
+    - a12
+  projectType: aws
+components:
+  - name: aws-runtime
+    container:
+      image: public.ecr.aws/aws-mde/universal-image:latest
+      mountSources: true
+      volumeMounts:
+        - name: shared-volume
+          path: /mnt
+  - name: shared-volume
+    volume:
+      size: 16Gi
+commands:
+  - id: installdependency
+    exec:
+      component: aws-runtime
+      commandLine: "npm install"
+      workingDir: /projects/frontend/application
+  - id: export-dev-variable
+    exec:
+      component: aws-runtime
+      commandLine: "echo 'REACT_APP_API_URL=http://localhost:3001' > .env"
+      workingDir: /projects/frontend/application
+  - id: install-terraform
+    exec:
+      component: aws-runtime
+      commandLine: "wget -O terraform.zip 'https://releases.hashicorp.com/terraform/1.4.5/terraform_1.4.5_linux_amd64.zip'"
+      workingDir: /projects/frontend
+  - id: config-terraform
+    exec:
+      commandLine: "unzip terraform.zip && rm terraform.zip && sudo mv terraform /usr/bin/terraform && chmod +x /usr/bin/terraform"
+      component: aws-runtime
+      workingDir: /projects/frontend
+  - id: install-tflint
+    exec:
+      commandLine: "curl -s https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh | bash"
+      component: aws-runtime
+events:
+  postStart:
+    - installdependency
+    - export-dev-variable
+    - install-terraform
+    - config-terraform
+    - install-tflint

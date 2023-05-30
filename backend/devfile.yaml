@@ -1,0 +1,43 @@
+schemaVersion: 2.0.0
+metadata:
+  name: backend
+  version: 1.0.1
+  displayName: Event Statisfication Rating Backend
+  description: Devfile for backend
+  tags:
+    - aws
+    - a12
+  projectType: aws
+components:
+  - name: aws-runtime
+    container:
+      image: public.ecr.aws/aws-mde/universal-image:latest
+      mountSources: true
+      volumeMounts:
+        - name: docker-store
+          path: /var/lib/docker
+      env:
+        - name: AWS_ACCESS_KEY_ID
+          value: DUMMYIDEXAMPLE
+        - name: AWS_SECRET_ACCESS_KEY
+          value: DUMMYEXAMPLEKEY
+        - name: REGION
+          value: ap-southeast-1
+  - name: docker-store
+    volume:
+      size: 16Gi
+  - name: dynamodb-local
+    container:
+      image: amazon/dynamodb-local
+      endpoints:
+        - name: dynamodb-local
+          targetPort: 8000
+          exposure: none
+commands:
+  - id: create-table
+    exec:
+      component: aws-runtime
+      commandLine: "aws dynamodb create-table --table-name rates --attribute-definitions AttributeName=star,AttributeType=N --key-schema AttributeName=star,KeyType=HASH --provisioned-throughput ReadCapacityUnits=5,WriteCapacityUnits=5 --table-class STANDARD --endpoint-url http://localhost:8000"
+events:
+  postStart:
+    - create-table

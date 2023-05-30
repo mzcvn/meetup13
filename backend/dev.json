@@ -1,0 +1,7 @@
+{
+  "Parameters": {
+    "TABLE_NAME": "rates",
+    "USE_LOCAL_DYNAMODB": "true",
+    "LOCAL_DB_ENDPOINT": "http://host.docker.internal:8000"
+  }
+}

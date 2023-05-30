@@ -1,0 +1,9 @@
+# Standard
+/.git
+/.vscode
+/.idea
+node_modules
+**/*_pb.js
+built # or whatever name you use for your TypeScript compiled output
+
+# Custom

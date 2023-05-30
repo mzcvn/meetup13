@@ -1,0 +1,87 @@
+Name: BuildAndTest
+SchemaVersion: "1.0"
+#RunMode: QUEUED | SUPERSEDED | PARALLEL
+Triggers:
+  - Type: PULLREQUEST
+    Events:
+      - OPEN
+      - REVISION
+    Branches:
+      - dev
+      - main
+Compute:
+  Type: Lambda
+  Fleet: Linux.x86-64.Large
+Actions:
+  BuildAndTest:
+    Actions:
+      LintAndTest:
+        Inputs:
+          Sources:
+            - WorkflowSource
+        Identifier: aws/managed-test@v1
+        Configuration:
+          Steps:
+            - Run: cd src/
+            - Run: "npm install"
+            - Run: "mkdir coverage/"
+            - Run: "npm run lint"
+            - Run: "npm test"
+        Outputs:
+          AutoDiscoverReports:
+            Enabled: true
+            ReportNamePrefix: Test
+            IncludePaths:
+                - "src/coverage/*"
+            SuccessCriteria:
+              PassRate: 90
+              LineCoverage: 50
+              BranchCoverage: 50
+              StaticAnalysisBug:
+                Severity: CRITICAL
+              StaticAnalysisSecurity:
+                Severity: CRITICAL
+              StaticAnalysisQuality:
+                Severity: CRITICAL
+      SecurityScan:
+        Inputs:
+          Sources:
+            - WorkflowSource
+        Identifier: aws/managed-test@v1
+        Configuration:
+          Steps:
+            - Run: sourceRepositoryDirectory=$(pwd)
+            - Run: cd src && npm install
+            - Run: cd .. && wget https://github.com/jeremylong/DependencyCheck/releases/download/v8.1.2/dependency-check-8.1.2-release.zip
+            - Run: unzip dependency-check-8.1.2-release.zip
+            - Run: cd dependency-check/bin
+            - Run: ./dependency-check.sh --scan $sourceRepositoryDirectory/src -o $sourceRepositoryDirectory/src/vulnerabilities -f SARIF --disableYarnAudit
+        Outputs:
+          AutoDiscoverReports:
+            Enabled: true
+            ReportNamePrefix: owasp
+            IncludePaths:
+                - "src/**/*"
+            SuccessCriteria:
+              Vulnerabilities:
+                Severity: CRITICAL
+      Build:
+        Identifier: aws/build@v1
+        Inputs:
+          Sources:
+            - WorkflowSource
+        Outputs:
+          Artifacts:
+            - Name: build_artifacts
+              Files:
+                - "**/*"
+        Configuration:
+          Steps:
+            - Run: sam build --template-file template.yaml
+            - Run: cd .aws-sam/build/
+            - Run: sam package --output-template-file packaged.yaml --resolve-s3 --template-file template.yaml --region ap-southeast-1
+        Environment:
+          Name: development
+          Connections:
+            - Name: "Your AWS account ID"
+              Role: CodeCatalystDevelopmentAdministrator
